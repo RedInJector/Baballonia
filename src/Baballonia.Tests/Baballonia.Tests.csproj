@@ -1,31 +1,32 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFrameworks>net8.0</TargetFrameworks>
+    <PropertyGroup>
+        <TargetFrameworks>net8.0</TargetFrameworks>
 
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.8" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.8" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.8" />
-    <PackageReference Include="JetBrains.Annotations" Version="2025.2.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="MSTest.TestAdapter" Version="3.10.2" />
-    <PackageReference Include="MSTest.TestFramework" Version="3.10.2" />
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.8"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.8"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.8"/>
+        <PackageReference Include="JetBrains.Annotations" Version="2025.2.0"/>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1"/>
+        <PackageReference Include="Moq" Version="4.20.72"/>
+        <PackageReference Include="MSTest.TestAdapter" Version="3.10.2"/>
+        <PackageReference Include="MSTest.TestFramework" Version="3.10.2"/>
 
-      <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.11.0.20250507" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
-  </ItemGroup>
+        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.11.0.20250507" Condition="$([MSBuild]::IsOSPlatform('Windows'))"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Baballonia.CaptureBin.IO\Baballonia.CaptureBin.IO.csproj" />
-    <ProjectReference Include="..\Baballonia.IPCameraCapture\Baballonia.IPCameraCapture.csproj" />
-    <ProjectReference Include="..\Baballonia.OpenCVCapture\Baballonia.OpenCVCapture.csproj" />
-    <ProjectReference Include="..\Baballonia\Baballonia.csproj" />
-      <ProjectReference Include="..\Baballonia.Desktop\Baballonia.Desktop.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Baballonia.CaptureBin.IO\Baballonia.CaptureBin.IO.csproj"/>
+        <ProjectReference Include="..\Baballonia.IPCameraCapture\Baballonia.IPCameraCapture.csproj"/>
+        <ProjectReference Include="..\Baballonia.OpenCVCapture\Baballonia.OpenCVCapture.csproj"/>
+        <ProjectReference Include="..\Baballonia.OverlaySDK\Baballonia.OverlaySDK.csproj" />
+        <ProjectReference Include="..\Baballonia\Baballonia.csproj"/>
+        <ProjectReference Include="..\Baballonia.Desktop\Baballonia.Desktop.csproj"/>
+    </ItemGroup>
 
     <ItemGroup>
         <Reference Include="OpenCvSharp">
@@ -38,21 +39,21 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
         <None Update="OverlayTests\user_cal.bin">
-          <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </None>
     </ItemGroup>
 
     <ItemGroup>
-        <Folder Include="Firmware\Linux\" />
-        <Folder Include="Firmware\MacOS\" />
+        <Folder Include="Firmware\Linux\"/>
+        <Folder Include="Firmware\MacOS\"/>
     </ItemGroup>
 
     <ItemGroup>
-        <None Remove="..\Baballonia\eyeModel.onnx" />
+        <None Remove="..\Baballonia\eyeModel.onnx"/>
         <EmbeddedResource Include="..\Baballonia\eyeModel.onnx">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </EmbeddedResource>
-        <None Remove="..\Baballonia\faceModel.onnx" />
+        <None Remove="..\Baballonia\faceModel.onnx"/>
         <EmbeddedResource Include="..\Baballonia\faceModel.onnx">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </EmbeddedResource>

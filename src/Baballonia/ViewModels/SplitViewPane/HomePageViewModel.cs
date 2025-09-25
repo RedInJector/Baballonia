@@ -397,7 +397,6 @@ public partial class HomePageViewModel : ViewModelBase, IDisposable
 
     public string RequestedVRCalibration = CalibrationRoutine.Map["QuickCalibration"];
 
-
     public HomePageViewModel(FacePipelineManager facePipelineManager,
         EyePipelineManager eyePipelineManager,
         IFacePipelineEventBus facePipelineEventBus,
