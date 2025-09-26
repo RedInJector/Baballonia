@@ -5,6 +5,7 @@ using Baballonia.Services;
 using JetBrains.Annotations;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using OverlaySDK;
+using OverlaySDK.Packets;
 
 namespace Baballonia.Tests;
 
@@ -18,10 +19,11 @@ public class PacketTest
     {
 
         Packet<StopEarlyPacket> packet = new(new StopEarlyPacket());
+
         var json = JsonSerializer.Serialize(packet);
         Assert.AreEqual("""{"PacketName":"StopEarlyPacket","PacketData":{}}""", json);
 
-        var deserialized = JsonSerializer.Deserialize<IncommingPacket>(json);
+        var deserialized = JsonSerializer.Deserialize<IncomingPacket>(json);
 
         Assert.AreEqual(packet.PacketName, deserialized.PacketName);
         var isemptyObj = deserialized.PacketData.RootElement.ValueKind == JsonValueKind.Object &&
@@ -29,27 +31,6 @@ public class PacketTest
         Assert.IsTrue(isemptyObj);
 
         Assert.IsTrue(deserialized.PacketName == typeof(StopEarlyPacket).Name);
-
-        var handelr = new MyPacketHandler();
     }
 
-    abstract class IncomingPacketAdapter
-    {
-        public virtual void OnStartRoutine(RunFixedLenghtRoutinePacket routine)
-        {
-
-        }
-        public virtual void OnStopEarly(StopEarlyPacket packet)
-        {
-
-        }
-    }
-
-    class MyPacketHandler : IncomingPacketAdapter
-    {
-        public override void OnStopEarly(StopEarlyPacket packet)
-        {
-            base.OnStopEarly(packet);
-        }
-    }
 }
