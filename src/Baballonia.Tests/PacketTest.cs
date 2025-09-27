@@ -30,7 +30,7 @@ public class PacketTest
                          !deserialized.PacketData.RootElement.EnumerateObject().Any();
         Assert.IsTrue(isemptyObj);
 
-        Assert.IsTrue(deserialized.PacketName == typeof(StopEarlyPacket).Name);
+        Assert.IsTrue(deserialized.PacketName == nameof(StopEarlyPacket));
     }
 
 }

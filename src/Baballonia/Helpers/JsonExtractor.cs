@@ -11,7 +11,6 @@ namespace Baballonia.Helpers
 
         public JsonDocument ReadUntilValidJson(Func<string> readLineFunction, TimeSpan timeout)
         {
-
             var startTime = DateTime.Now;
             while (true)
             {

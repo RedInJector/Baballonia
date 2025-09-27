@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using OverlaySDK.Packets;
@@ -7,24 +8,29 @@ namespace OverlaySDK;
 
 public interface IConnection
 {
-    void Send(string data);
-    string Receive();
+    void Send(string data, TimeSpan timeout);
+    string Receive(TimeSpan timeout);
     Task SendAsync(string data, CancellationToken token);
     Task<string> ReceiveAsync(CancellationToken token);
 
     void Terminate();
 }
 
-public interface IOverlayConnectionFactory
+public interface ITcpConnectionFactory
 {
-    Task<IConnection> WaitForConnection(CancellationToken token);
+    Task<IConnection> ServeOnce(IPAddress address, int port, CancellationToken token);
+    Task<IConnection> Connect(IPAddress address, int port, CancellationToken token);
 }
 
 public interface IOverlayMessageDispatcher
 {
     void RegisterHandler(PacketHandlerAdapter adapter);
     void UnRegisterHandler(PacketHandlerAdapter adapter);
-    void Dispatch<T>(T packet);
+    Task DispatchAsync<T>(Packet<T> packet);
+    void Dispatch<T>(Packet<T> packet);
+    public Task AcceptConnectionAsync(IPAddress address, int port);
+    public Task ConnectToAsync(IPAddress address, int port);
+    void Stop();
 }
 
 public interface IPacketDeserializer
@@ -59,9 +65,9 @@ public class AdapterDispatcherBuilder
     }
 }
 
-public class OverlayMessageDispatcher : IOverlayMessageDispatcher
+public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
 {
-    private IConnection _connection;
+    private IConnection? _connection;
     private CancellationTokenSource _cts = new();
     private Dictionary<string, Type> _cachedPacketTypes = [];
     private AdapterDispatcherBuilder _adapterDispatcherBuilder = new();
@@ -69,13 +75,11 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher
     private readonly Dictionary<string, List<PacketHandlerAdapter>> _adaptersPerPacket = new();
     private readonly Dictionary<string, Action<PacketHandlerAdapter, object>> _methodDispatcher;
 
-    private readonly IOverlayConnectionFactory _connectionFactory;
-    private readonly IPacketDeserializer _packetDeserializer;
+    private readonly ITcpConnectionFactory _connectionFactory;
 
-    public OverlayMessageDispatcher(IOverlayConnectionFactory connectionFactory, IPacketDeserializer packetDeserializer)
+    public OverlayMessageDispatcher(ITcpConnectionFactory connectionFactory)
     {
         _connectionFactory = connectionFactory;
-        _packetDeserializer = packetDeserializer;
 
         CachePacketTypes();
         _methodDispatcher = _adapterDispatcherBuilder.BuildDispatcher(typeof(PacketHandlerAdapter));
@@ -117,13 +121,15 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher
         }
     }
 
-    public void Dispatch<T>(T packet)
+    public async Task DispatchAsync<T>(Packet<T> packet)
     {
+        var str = JsonSerializer.Serialize(packet);
+        await _connection.SendAsync(str, _cts.Token);
     }
-
-    public Task StartAsync()
+    public void Dispatch<T>(Packet<T> packet)
     {
-        return Task.Run(AcceptConnectionAsync);
+        var str = JsonSerializer.Serialize(packet);
+        _connection.Send(str, TimeSpan.MaxValue);
     }
 
     public void Stop()
@@ -131,12 +137,26 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher
         _cts.Cancel();
     }
 
-    private async Task AcceptConnectionAsync()
+    public bool IsConnected()
     {
-        var connection = await _connectionFactory.WaitForConnection(_cts.Token);
-        _connection = connection;
+        return _connection != null;
+    }
 
-        await HandleConnectionAsync(connection, _cts.Token);
+    public async Task AcceptConnectionAsync(IPAddress address, int port)
+    {
+        var connection = await _connectionFactory.ServeOnce(address, port, _cts.Token);
+        var jsonConnection = new JsonConnection(connection);
+        _connection = jsonConnection;
+
+        // _ = HandleConnectionAsync(_connection, _cts.Token);
+    }
+    public async Task ConnectToAsync(IPAddress address, int port)
+    {
+        var connection = await _connectionFactory.Connect(address, port, _cts.Token);
+        var jsonConnection = new JsonConnection(connection);
+        _connection = jsonConnection;
+
+        _ = HandleConnectionAsync(_connection, _cts.Token);
     }
 
     private async Task HandleConnectionAsync(IConnection connection, CancellationToken ct)
@@ -149,18 +169,21 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher
                 if (rawData.Length == 0)
                     continue;
 
-                var message = _packetDeserializer.DeserializePacket(rawData);
+                var message = JsonSerializer.Deserialize<IncomingPacket>(rawData);
+                if (message == null)
+                    continue;
+
                 _cachedPacketTypes.TryGetValue(message.PacketName, out var type);
                 if (type == null)
                     throw new ArgumentException($"{message.PacketName} is not a registered packet type");
 
-                var packetData = _packetDeserializer.DeserializeDataOnly(rawData, type);
+                var packetData = message.PacketData.Deserialize(type);
 
                 if (!_methodDispatcher.TryGetValue(message.PacketName, out var method))
-                    return;
+                    continue;
 
                 if (!_adaptersPerPacket.TryGetValue(message.PacketName, out var adapters))
-                    return;
+                    continue;
 
                 foreach (var packetHandlerAdapter in adapters)
                 {
@@ -170,7 +193,18 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher
         }
         catch (OperationCanceledException)
         {
+            _connection.Terminate();
             // shutting down
         }
+        catch (Exception ex)
+        {
+            _connection.Terminate();
+            _connection = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        _connection.Terminate();
     }
 }

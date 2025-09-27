@@ -6,6 +6,7 @@ namespace OverlaySDK.Packets;
 public record InitializePacket(string AppVersion)
 {
 }
+public record EndOfConnectionPacket(){}
 
 public record RunFixedLenghtRoutinePacket(string RoutineName)
 {
