@@ -27,4 +27,32 @@ EventDrivenJsonClient client = new EventDrivenJsonClient(tcp);
 // Step 5: Create a message dispatcher and register handlers
 OverlayMessageDispatcher messageDispatcher = new OverlayMessageDispatcher(logger, client);
 messageDispatcher.RegisterHandler(myHandlerInstance);
+
+// Step 6: Send messages
+messageDispatcher.Dispatch(new SomePacketType());
+```
+
+### Example handler implementation
+
+```csharp
+class MyHandler : PacketHandlerAdapter
+{
+    // inject the dispatcher itself for simplicity if needed
+    private OverlayMessageDispatcher _dispatcher;
+
+    public MyHandler(OverlayMessageDispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+        _dispatcher.RegisterHandler(this);
+    }
+
+    // override what's needed
+    public override void OnStartRoutine(RunFixedLenghtRoutinePacket routine)
+    {
+        // do stuff
+
+        // signal termination (this forces the other side to terminate the connection)
+        _dispatcher.Dispatch(new EndOfConnectionPacket());
+    }
+}
 ```
