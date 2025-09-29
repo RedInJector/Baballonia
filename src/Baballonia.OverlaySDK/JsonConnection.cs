@@ -6,7 +6,7 @@ public class JsonConnection : IConnection
 {
     private StringBuilder _buffer = new StringBuilder();
     private int _lastScannedIndex = 0;
-    private readonly IConnection _base;
+    private readonly IConnection? _base;
 
     public JsonConnection(IConnection @base)
     {
@@ -16,7 +16,7 @@ public class JsonConnection : IConnection
 
     public void Send(string data, TimeSpan timeout)
     {
-        _base.Send(data, timeout);
+        _base?.Send(data, timeout);
     }
 
     public string Receive(TimeSpan timeout)
@@ -68,9 +68,11 @@ public class JsonConnection : IConnection
     }
 
 
-    public Task SendAsync(string data, CancellationToken token)
+    public Task SendAsync(string data)
     {
-        return _base.SendAsync(data, token);
+        if (_base != null) return _base.SendAsync(data);
+
+        return Task.CompletedTask;
     }
 
     public async Task<string> ReceiveAsync(CancellationToken token)
@@ -108,15 +110,14 @@ public class JsonConnection : IConnection
             _lastScannedIndex = Math.Max(0, content.Length - 1);
 
             // Only read if buffer was processed and still no JSON
-            string line = await _base.ReceiveAsync(token);
-            if (!string.IsNullOrWhiteSpace(line))
+            string blob = await _base.ReceiveAsync(token);
+            if (!string.IsNullOrWhiteSpace(blob))
             {
-                _buffer.Append(line);
-                _lastScannedIndex = Math.Max(0, _buffer.Length - line.Length);
+                _buffer.Append(blob);
+                _lastScannedIndex = Math.Max(0, _buffer.Length - blob.Length);
             }
         }
-
-        return "";
+        throw new OperationCanceledException();
     }
 
     public void Terminate()

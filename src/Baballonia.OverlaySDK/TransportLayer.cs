@@ -10,7 +10,7 @@ public interface IConnection
 {
     void Send(string data, TimeSpan timeout);
     string Receive(TimeSpan timeout);
-    Task SendAsync(string data, CancellationToken token);
+    Task SendAsync(string data);
     Task<string> ReceiveAsync(CancellationToken token);
 
     void Terminate();
@@ -74,11 +74,16 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
 
     private readonly Dictionary<string, List<PacketHandlerAdapter>> _adaptersPerPacket = new();
     private readonly Dictionary<string, Action<PacketHandlerAdapter, object>> _methodDispatcher;
+    private readonly List<PacketHandlerAdapter> _adapters = [];
 
     private readonly ITcpConnectionFactory _connectionFactory;
+    private readonly ILogger _logger;
 
-    public OverlayMessageDispatcher(ITcpConnectionFactory connectionFactory)
+    public Task HandlerTask { get; private set; } = Task.CompletedTask;
+
+    public OverlayMessageDispatcher(ILogger logger, ITcpConnectionFactory connectionFactory)
     {
+        _logger = logger;
         _connectionFactory = connectionFactory;
 
         CachePacketTypes();
@@ -111,6 +116,8 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
             if (!list.Contains(adapter))
                 list.Add(adapter);
         }
+
+        _adapters.Add(adapter);
     }
 
     public void UnRegisterHandler(PacketHandlerAdapter adapter)
@@ -119,17 +126,19 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
         {
             list.Remove(adapter);
         }
+
+        _adapters.Remove(adapter);
     }
 
     public async Task DispatchAsync<T>(Packet<T> packet)
     {
         var str = JsonSerializer.Serialize(packet);
-        await _connection.SendAsync(str, _cts.Token);
+        if (_connection != null) await _connection.SendAsync(str);
     }
     public void Dispatch<T>(Packet<T> packet)
     {
         var str = JsonSerializer.Serialize(packet);
-        _connection.Send(str, TimeSpan.MaxValue);
+        _connection?.Send(str, TimeSpan.MaxValue);
     }
 
     public void Stop()
@@ -148,7 +157,7 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
         var jsonConnection = new JsonConnection(connection);
         _connection = jsonConnection;
 
-        // _ = HandleConnectionAsync(_connection, _cts.Token);
+        HandlerTask = HandleConnectionAsync(_connection, _cts.Token);
     }
     public async Task ConnectToAsync(IPAddress address, int port)
     {
@@ -156,55 +165,116 @@ public class OverlayMessageDispatcher : IOverlayMessageDispatcher, IDisposable
         var jsonConnection = new JsonConnection(connection);
         _connection = jsonConnection;
 
-        _ = HandleConnectionAsync(_connection, _cts.Token);
+        HandlerTask = HandleConnectionAsync(_connection, _cts.Token);
     }
 
+    private void UpdateLoop()
+    {
+
+    }
     private async Task HandleConnectionAsync(IConnection connection, CancellationToken ct)
     {
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (true)
             {
-                var rawData = await connection.ReceiveAsync(ct);
-                if (rawData.Length == 0)
+                var rawjson = await connection.ReceiveAsync(ct);
+                if (rawjson.Length == 0)
                     continue;
 
-                var message = JsonSerializer.Deserialize<IncomingPacket>(rawData);
-                if (message == null)
+                JsonDocument doc;
+                try
+                {
+                    doc = JsonDocument.Parse(rawjson);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug($"Received malformed json: {rawjson}");
+                    _logger.Error("Received malformed json");
                     continue;
+                }
+
+                var success = doc.TryDeserialize<IncomingPacket>(out var message);
+                if (!success || message == null)
+                {
+                    _logger.Debug($"Could not deserialize incoming json {rawjson}");
+                    _logger.Error("Could not deserialize incoming json");
+                    continue;
+                }
+
+                if (message.PacketName == nameof(EndOfConnectionPacket))
+                {
+                    _logger.Info("Client EOC packet received. Termination requested");
+                    TerminateConnection();
+                }
 
                 _cachedPacketTypes.TryGetValue(message.PacketName, out var type);
                 if (type == null)
-                    throw new ArgumentException($"{message.PacketName} is not a registered packet type");
-
-                var packetData = message.PacketData.Deserialize(type);
-
-                if (!_methodDispatcher.TryGetValue(message.PacketName, out var method))
-                    continue;
-
-                if (!_adaptersPerPacket.TryGetValue(message.PacketName, out var adapters))
-                    continue;
-
-                foreach (var packetHandlerAdapter in adapters)
                 {
-                    method(packetHandlerAdapter, packetData);
+                    _logger.Error($"{message.PacketName} is not a registered packet type");
+                    continue;
                 }
+
+                // this should not fail because we check for type before
+                var packetData = message.PacketData.Deserialize(type)!;
+
+                NotifyAdapters(message.PacketName, packetData);
             }
         }
         catch (OperationCanceledException)
         {
-            _connection.Terminate();
-            // shutting down
+            _logger.Info("Termination requested");
+            TerminateConnection();
         }
         catch (Exception ex)
         {
-            _connection.Terminate();
-            _connection = null;
+            _logger.Error("Exception happened during execution, requesting termination", ex);
+            TerminateConnection();
+        }
+    }
+
+    private void TerminateConnection()
+    {
+        _cts.Cancel();
+        var con = Interlocked.Exchange(ref _connection, null);
+        if (con == null)
+        {
+            _logger.Info("Connection already terminated");
+            return;
+        }
+
+        _logger.Info("Terminating connection");
+        foreach (var packetHandlerAdapter in _adapters)
+        {
+            packetHandlerAdapter.OnTermination();
+        }
+        con?.Terminate();
+    }
+
+    private void NotifyAdapters(string packetName, object obj)
+    {
+        if (!_methodDispatcher.TryGetValue(packetName, out var method))
+            return;
+
+        if (!_adaptersPerPacket.TryGetValue(packetName, out var adapters))
+            return;
+
+        foreach (var packetHandlerAdapter in adapters)
+        {
+            method(packetHandlerAdapter, obj);
+        }
+    }
+
+    private void NotifyAdaptersException(Exception ex)
+    {
+        foreach (var packetHandlerAdapter in _adapters)
+        {
+            packetHandlerAdapter.OnException(ex);
         }
     }
 
     public void Dispose()
     {
-        _connection.Terminate();
+        TerminateConnection();
     }
 }

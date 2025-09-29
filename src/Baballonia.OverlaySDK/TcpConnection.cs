@@ -8,7 +8,6 @@ public class TcpConnection : IConnection, IDisposable
 
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
-    private readonly StreamReader _reader;
     private readonly StreamWriter _writer;
     private bool _isDisposed = false;
 
@@ -16,7 +15,6 @@ public class TcpConnection : IConnection, IDisposable
     {
         _client = client ?? throw new ArgumentException(nameof(client));
         _stream = _client.GetStream();
-        _reader = new StreamReader(_stream, Encoding.UTF8, leaveOpen: true);
         _writer = new StreamWriter(_stream, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
     }
 
@@ -24,6 +22,7 @@ public class TcpConnection : IConnection, IDisposable
     {
         ArgumentNullException.ThrowIfNull(data);
         _writer.Write(data);
+        _writer.Flush();
     }
 
     public string Receive(TimeSpan timeout)
@@ -36,27 +35,30 @@ public class TcpConnection : IConnection, IDisposable
         return Encoding.UTF8.GetString(buffer);
     }
 
-    public async Task SendAsync(string data, CancellationToken token)
+    public async Task SendAsync(string data)
     {
-        await _writer.WriteAsync(data.AsMemory(), token);
-        await _writer.FlushAsync(token);
+        await _writer.WriteAsync(data.AsMemory());
+        await _writer.FlushAsync();
     }
 
     public async Task<string> ReceiveAsync(CancellationToken token)
     {
+        if (token.IsCancellationRequested)
+            return "";
         var stream = _client.GetStream();
         var buffer = new byte[_client.Available > 0 ? _client.Available : 1024];
 
-        await stream.ReadAtLeastAsync(buffer, 1, true, token);
+        var len = await stream.ReadAtLeastAsync(buffer, 1, true, token);
 
-        return Encoding.UTF8.GetString(buffer);
+
+        return Encoding.UTF8.GetString(buffer, 0, len);
     }
 
     public void Terminate()
     {
+        _writer.Flush();
         if(_isDisposed) return;
         _writer.Dispose();
-        _reader.Dispose();
         _stream.Dispose();
         _client.Close();
 
@@ -65,7 +67,6 @@ public class TcpConnection : IConnection, IDisposable
 
     public void Dispose()
     {
-        if(_isDisposed) return;
         Terminate();
     }
 }
