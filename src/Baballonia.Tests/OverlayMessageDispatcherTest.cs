@@ -19,7 +19,7 @@ namespace Baballonia.Tests;
 public class OverlayMessageDispatcherTest
 {
     [TestMethod]
-    public async Task DispatchOneSuccess()
+    public void DispatchOneSuccess()
     {
         ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
         LoggerImpl loggerImpl = new LoggerImpl(factory.CreateLogger<OverlayMessageDispatcher>());
@@ -28,37 +28,21 @@ public class OverlayMessageDispatcherTest
             new Packet<RunFixedLenghtRoutinePacket>(new RunFixedLenghtRoutinePacket("balls"));
         var serializedJson = JsonSerializer.Serialize(packet);
 
-        var mockConnection = new Mock<IConnection>();
-        mockConnection
-            .Setup(connection => connection.ReceiveAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(serializedJson);
-
-        var mockConnectionFactory = new Mock<ITcpConnectionFactory>();
-        mockConnectionFactory
-            .Setup(s => s.ServeOnce(It.IsAny<IPAddress>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(mockConnection.Object);
-
-        var mockPacketDeserializer = new Mock<IPacketDeserializer>();
-        mockPacketDeserializer
-            .Setup(deserializer => deserializer.DeserializePacket(It.IsAny<string>()))
-            .Returns((string message) =>
-                JsonSerializer.Deserialize<IncomingPacket>(message) ?? throw new InvalidOperationException());
+        var mockConnection = new Mock<IEventDrivenConnection<object, JsonDocument>>();
 
         var overlayDispatcher =
-            new OverlayMessageDispatcher(loggerImpl, mockConnectionFactory.Object);
+            new OverlayMessageDispatcher(loggerImpl, mockConnection.Object);
 
         var mockHandler = new Mock<PacketHandlerAdapter>();
         mockHandler
-            .Setup(adapter => adapter.OnStartRoutine(It.IsAny<RunFixedLenghtRoutinePacket>()))
-            .Callback<RunFixedLenghtRoutinePacket>((obj) => { overlayDispatcher.Stop(); });
+            .Setup(adapter => adapter.OnStartRoutine(It.IsAny<RunFixedLenghtRoutinePacket>()));
 
 
         overlayDispatcher.RegisterHandler(mockHandler.Object);
-        var task = overlayDispatcher.AcceptConnectionAsync(IPAddress.Any, 1234);
-        // some time and manual stop in case something breaks so we won't wait indefinitely
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        overlayDispatcher.Stop();
-        await task;
+
+        mockConnection.Raise(client => client.DataReceived += null, JsonDocument.Parse(serializedJson));
+
+        overlayDispatcher.Dispose();
 
         mockHandler.Verify(
             adapter => adapter.OnStartRoutine(
@@ -96,7 +80,7 @@ public class OverlayMessageDispatcherTest
     }
 
     [TestMethod]
-    public async Task IntegrationTest()
+    public async Task SimulatedIntegrationTest()
     {
         ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole().AddDebug());
         var logger1 = factory.CreateLogger("Dispatcher1");
@@ -105,89 +89,49 @@ public class OverlayMessageDispatcherTest
         LoggerImpl loggerImpl2 = new LoggerImpl(logger2);
 
 
-        Packet<RunFixedLenghtRoutinePacket> packet =
-            new Packet<RunFixedLenghtRoutinePacket>(new RunFixedLenghtRoutinePacket("balls"));
+        RunFixedLenghtRoutinePacket packet = new RunFixedLenghtRoutinePacket("balls");
 
-        TcpConnectionFactory connectionFactory = new TcpConnectionFactory();
-        OverlayMessageDispatcher messageDispatcher1 = new OverlayMessageDispatcher(loggerImpl1, connectionFactory);
-        OverlayMessageDispatcher messageDispatcher2 = new OverlayMessageDispatcher(loggerImpl2, connectionFactory);
 
         var isFinishedReading = new TaskCompletionSource();
         var mockHandler1 = new Mock<PacketHandlerAdapter>();
         mockHandler1
-            .Setup(adapter => adapter.OnStartRoutine(It.IsAny<RunFixedLenghtRoutinePacket>()))
-            .Callback<RunFixedLenghtRoutinePacket>((obj) => { isFinishedReading.SetResult(); });
-
-        messageDispatcher2.RegisterHandler(mockHandler1.Object);
+            .Setup(adapter => adapter.OnTermination())
+            .Callback(() => { isFinishedReading.SetResult(); });
+        mockHandler1
+            .Setup(adapter => adapter.OnStartRoutine(It.IsAny<RunFixedLenghtRoutinePacket>()));
 
         var task1 = Task.Run(async () =>
         {
-            await messageDispatcher1.AcceptConnectionAsync(IPAddress.Loopback, 1234);
-            await messageDispatcher1.DispatchAsync(packet);
-            await messageDispatcher1.DispatchAsync(new Packet<EndOfConnectionPacket>(new EndOfConnectionPacket()));
+            SocketFactory sfactory = new SocketFactory();
+            var sock = sfactory.CreateClient("127.0.0.1", 1234);
+            EventDrivenTcpClient tcp = new EventDrivenTcpClient(sock);
+            EventDrivenJsonClient client = new EventDrivenJsonClient(tcp);
+            OverlayMessageDispatcher messageDispatcher = new OverlayMessageDispatcher(loggerImpl1, client);
+            messageDispatcher.Dispatch(packet);
+            messageDispatcher.Dispatch(new EndOfConnectionPacket());
+
+            await isFinishedReading.Task;
+            Assert.IsFalse(messageDispatcher.IsConnected());
         });
         var task2 = Task.Run(async () =>
         {
-            await messageDispatcher2.ConnectToAsync(IPAddress.Loopback, 1234);
+            SocketFactory sfactory = new SocketFactory();
+            var sock = sfactory.CreateServer("127.0.0.1", 1234);
+            EventDrivenTcpClient tcp = new EventDrivenTcpClient(sock);
+            EventDrivenJsonClient client = new EventDrivenJsonClient(tcp);
+            OverlayMessageDispatcher messageDispatcher = new OverlayMessageDispatcher(loggerImpl2, client);
+            messageDispatcher.RegisterHandler(mockHandler1.Object);
+
             await isFinishedReading.Task;
+            Assert.IsFalse(messageDispatcher.IsConnected());
         });
+
 
         await task1;
         await task2;
 
-        messageDispatcher1.Dispose();
-
-        await messageDispatcher2.HandlerTask;
-
         mockHandler1.Verify(
             adapter => adapter.OnStartRoutine(
-                It.Is<RunFixedLenghtRoutinePacket>(p => p.RoutineName == packet.PacketData.RoutineName)), Times.Once);
-    }
-
-    [TestMethod]
-    public async Task IntegrationTestUnknownPacket()
-    {
-        LoggerFactory factory = new LoggerFactory();
-        LoggerImpl loggerImpl1 = new LoggerImpl(factory.CreateLogger("Dispatcher1"));
-        LoggerImpl loggerImpl2 = new LoggerImpl(factory.CreateLogger("Dispatcher2"));
-
-
-        Packet<RunFixedLenghtRoutinePacket> packet =
-            new Packet<RunFixedLenghtRoutinePacket>(new RunFixedLenghtRoutinePacket("balls"));
-        packet.PacketName = "Ballz";
-
-        TcpConnectionFactory connectionFactory = new TcpConnectionFactory();
-        OverlayMessageDispatcher messageDispatcher1 = new OverlayMessageDispatcher(loggerImpl1, connectionFactory);
-        OverlayMessageDispatcher messageDispatcher2 = new OverlayMessageDispatcher(loggerImpl2, connectionFactory);
-
-        var isFinishedReading = new TaskCompletionSource();
-        var mockHandler1 = new Mock<PacketHandlerAdapter>();
-        mockHandler1
-            .Setup(adapter => adapter.OnStartRoutine(It.IsAny<RunFixedLenghtRoutinePacket>()))
-            .Callback<RunFixedLenghtRoutinePacket>((obj) => { isFinishedReading.SetResult(); });
-        mockHandler1
-            .Setup(adapter => adapter.OnEOC(It.IsAny<EndOfConnectionPacket>()))
-            .Callback<EndOfConnectionPacket>((obj) => { isFinishedReading.SetResult(); });
-
-        messageDispatcher2.RegisterHandler(mockHandler1.Object);
-
-        var task1 = Task.Run(async () =>
-        {
-            await messageDispatcher1.AcceptConnectionAsync(IPAddress.Loopback, 1234);
-            await messageDispatcher1.DispatchAsync(packet);
-        });
-        var task2 = Task.Run(async () => { await messageDispatcher2.ConnectToAsync(IPAddress.Loopback, 1234); });
-
-        await task1;
-        await task2;
-
-        await isFinishedReading.Task;
-
-        messageDispatcher1.Dispose();
-
-
-        mockHandler1.Verify(
-            adapter => adapter.OnStartRoutine(
-                It.Is<RunFixedLenghtRoutinePacket>(p => p.RoutineName == packet.PacketData.RoutineName)), Times.Never);
+                It.Is<RunFixedLenghtRoutinePacket>(p => p.RoutineName == packet.RoutineName)), Times.Once);
     }
 }

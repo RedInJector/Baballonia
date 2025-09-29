@@ -18,19 +18,20 @@ public class PacketTest
     public void Test()
     {
 
-        Packet<StopEarlyPacket> packet = new(new StopEarlyPacket());
+        Packet<RunFixedLenghtRoutinePacket> packet = new(new RunFixedLenghtRoutinePacket("ballz"));
 
         var json = JsonSerializer.Serialize(packet);
-        Assert.AreEqual("""{"PacketName":"StopEarlyPacket","PacketData":{}}""", json);
+        Assert.AreEqual("""{"PacketName":"RunFixedLenghtRoutinePacket","PacketData":{"RoutineName":"ballz"}}""", json);
 
         var deserialized = JsonSerializer.Deserialize<IncomingPacket>(json);
 
         Assert.AreEqual(packet.PacketName, deserialized.PacketName);
         var isemptyObj = deserialized.PacketData.RootElement.ValueKind == JsonValueKind.Object &&
                          !deserialized.PacketData.RootElement.EnumerateObject().Any();
-        Assert.IsTrue(isemptyObj);
 
-        Assert.IsTrue(deserialized.PacketName == nameof(StopEarlyPacket));
+        Assert.IsFalse(isemptyObj);
+
+        Assert.AreEqual(deserialized.PacketName, nameof(RunFixedLenghtRoutinePacket));
     }
 
 }

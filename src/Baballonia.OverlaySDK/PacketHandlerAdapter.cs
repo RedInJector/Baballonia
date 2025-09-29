@@ -14,11 +14,6 @@ public abstract class PacketHandlerAdapter
 
         }
 
-        public virtual void OnStopEarly(StopEarlyPacket packet)
-        {
-
-        }
-
         public virtual void OnTermination()
         {
 
