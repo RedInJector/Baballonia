@@ -4,6 +4,7 @@ using Baballonia.Desktop.Captures;
 using System;
 using System.Threading;
 using Baballonia.Contracts;
+using Baballonia.Desktop.Calibration.godot;
 using Microsoft.Extensions.DependencyInjection;
 using Velopack;
 
@@ -35,7 +36,7 @@ sealed class Program
         VelopackApp.Build().Run();
 
         App.RegisterPlatformServices<
-            AeroOverlayTrainerCombo,
+            Overlay,
             DesktopDeviceEnumerator,
             DesktopConnector
         >();
